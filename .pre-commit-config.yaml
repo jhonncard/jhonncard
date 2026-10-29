@@ -1,0 +1,30 @@
+# Pre-commit — JHOCA LABS. Copiar a la raíz del repo como .pre-commit-config.yaml
+# Ataja el secreto ANTES de que entre al historial (lo barato es no commitearlo).
+# Instalar una vez por repo:
+#   pipx install pre-commit   # o: pip install pre-commit
+#   pre-commit install
+# Correr sobre todo el repo manualmente:
+#   pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks # usa el .gitleaks.toml del repo si existe
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key # claves RSA/SSH/PEM pegadas por error
+      - id: check-added-large-files # evita subir volcados/binarios
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  # Python (opcional — descomentar en repos Python):
+  # - repo: https://github.com/astral-sh/ruff-pre-commit
+  #   rev: v0.6.9
+  #   hooks:
+  #     - id: ruff
+  #     - id: ruff-format

@@ -1,0 +1,23 @@
+# Config de gitleaks — JHOCA LABS. Copiar a la raíz del repo como .gitleaks.toml
+# Usa el set de reglas por defecto y añade una allowlist corta para placeholders.
+# NO metas aquí ficheros .md en bloque: en terranovaiq un secreto real vivía en
+# un .md del historial. Allowlistea solo lo que es demostrablemente un ejemplo.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders y ficheros de ejemplo permitidos"
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''(^|/)\.env\.[^/]*\.example$''',
+  '''(^|/)\.env\.sample$''',
+]
+regexes = [
+  '''(?i)change[_-]?me''',
+  '''(?i)your[_-]?(api[_-]?)?(key|token|secret)[_-]?here''',
+  '''(?i)replace[_-]?with''',
+  '''x{6,}''',
+  '''\$\{[A-Z0-9_]+\}''',          # interpolación de variable, no un secreto
+  '''(?i)dummy|placeholder|example''',
+]
