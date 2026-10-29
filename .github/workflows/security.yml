@@ -51,29 +51,21 @@ jobs:
 
       # ── MODO BASELINE (adopción) ───────────────────────────────────────────
       # Al introducir el gate en un repo con deuda histórica NO se bloquea por
-      # esa deuda (si no, ningún PR mergea). Bloquea solo lo de deuda ~nula y
-      # alto valor: secretos (gitleaks, job aparte) + misconfig de IaC/Docker.
-      # CVEs de dependencias y SAST entran REPORT-ONLY; se queman por repo y,
-      # cuando el repo llega a cero, se cambia exit-code/continue-on-error a
-      # bloqueante (ver README · se registra en gobierno/REGISTRO-EXCEPCIONES).
+      # esa deuda (si no, ningún PR mergea). La ÚNICA línea dura es SECRETOS
+      # (job `secretos`/gitleaks). CVEs de dependencias, misconfig IaC/Docker y
+      # SAST entran REPORT-ONLY; se queman por repo y, al llegar a cero, se
+      # ponen bloqueantes (ver README · gobierno/REGISTRO-EXCEPCIONES).
 
       # Trivy por script oficial (evita depender de versiones del action).
       - name: Instalar Trivy
         run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
 
-      # BLOQUEANTE — misconfig de IaC/Docker + secretos en el árbol.
-      # (trivy lee .trivyignore de la raíz automáticamente.)
-      - name: Trivy — misconfig + secretos (bloqueante)
+      # REPORT-ONLY (baseline) — CVEs de dependencias + misconfig IaC/Docker.
+      # No rompen el build (los secretos los bloquea gitleaks, job aparte).
+      # Flip a bloqueante: --exit-code 1 cuando el repo quede en cero.
+      - name: Trivy — CVEs + misconfig (informativo)
         run: |
-          trivy fs --scanners misconfig,secret \
-            --severity CRITICAL,HIGH --exit-code 1 --no-progress \
-            --skip-dirs node_modules,.next,dist,build .
-
-      # REPORT-ONLY (baseline) — CVEs de dependencias. Informan, no rompen.
-      # Flip a bloqueante: cambiar --exit-code 0 por 1 cuando el repo quede en cero.
-      - name: Trivy — CVEs de dependencias (informativo)
-        run: |
-          trivy fs --scanners vuln \
+          trivy fs --scanners vuln,misconfig \
             --severity CRITICAL,HIGH --ignore-unfixed --exit-code 0 --no-progress \
             --skip-dirs node_modules,.next,dist,build .
 
