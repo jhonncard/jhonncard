@@ -1,0 +1,105 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Puerta de seguridad en CI — JHOCA LABS (DevSecOps)
+# Copiar a cada repo como  .github/workflows/security.yml
+#
+# Rompe el build ante: secretos (working tree + historial), CVEs CRÍTICAS/ALTAS
+# con fix disponible, misconfiguraciones de IaC/Docker, y hallazgos SAST de alta
+# confianza. Cubre A-SEC-01, A-DEP-01 [BLOQ], A-DEP-04, I-IMG-01 [BLOQ].
+#
+# Es políglota: los pasos se auto-activan según lo que haya en el repo
+# (requirements.txt, lockfiles npm/pnpm, Dockerfile…). No hace falta tocar nada.
+# Excepciones (falsos positivos / riesgo aceptado): .trivyignore + .gitleaks.toml,
+# y se registran en gobierno/REGISTRO-EXCEPCIONES.md con caducidad.
+# ─────────────────────────────────────────────────────────────────────────────
+name: security
+
+on:
+  push:
+    branches: [main, master, develop, staging]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # lunes 06:00 UTC — recoge CVEs nuevas sin tocar código
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secretos:
+    name: Secretos (gitleaks · árbol + historial)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # historial completo: atrapa secretos ya commiteados
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: ${{ github.workspace }}/.gitleaks.toml
+
+  codigo-y-deps:
+    name: CVEs + IaC + SAST (trivy · semgrep · pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Gate principal: vulnerabilidades (todos los ecosistemas), misconfig de
+      # Docker/IaC y secretos en el árbol. Solo CRÍTICA/ALTA y solo si hay fix.
+      - name: Trivy (vuln + misconfig + secret)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+      # SAST: inyección, SSRF, path traversal, authz rota… Falla solo en ERROR
+      # (alta confianza) para no ahogar el build con ruido el primer día.
+      - name: Semgrep (SAST)
+        run: |
+          pipx install semgrep || pip install --user semgrep
+          semgrep scan \
+            --config p/default \
+            --config p/secrets \
+            --severity ERROR \
+            --error \
+            --metrics off \
+            --exclude node_modules --exclude .next --exclude dist --exclude build \
+            .
+
+      # Python: pip-audit es más fiel que osv para requirements.txt (lección
+      # 204-vs-24). Audita CADA requirements.txt real del repo.
+      - name: pip-audit (si hay Python)
+        if: ${{ hashFiles('**/requirements.txt') != '' }}
+        run: |
+          pipx install pip-audit || pip install --user pip-audit
+          found=0
+          while IFS= read -r -d '' req; do
+            found=1
+            echo "::group::pip-audit $req"
+            pip-audit -r "$req" --strict || exit 1
+            echo "::endgroup::"
+          done < <(find . -name requirements.txt -not -path '*/node_modules/*' -print0)
+          [ "$found" -eq 1 ] || echo "sin requirements.txt — nada que auditar"
+
+  # OPCIONAL — descomentar si el repo construye su imagen en CI:
+  # imagen:
+  #   name: Imagen Docker (trivy image)
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: docker build -t app:ci -f Dockerfile.prod .
+  #     - uses: aquasecurity/trivy-action@0.28.0
+  #       with:
+  #         scan-type: image
+  #         image-ref: app:ci
+  #         severity: CRITICAL,HIGH
+  #         ignore-unfixed: true
+  #         exit-code: "1"
