@@ -47,22 +47,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Gate principal: vulnerabilidades (todos los ecosistemas), misconfig de
-      # Docker/IaC y secretos en el árbol. Solo CRÍTICA/ALTA y solo si hay fix.
-      - name: Trivy (vuln + misconfig + secret)
+      # ── MODO BASELINE (adopción) ───────────────────────────────────────────
+      # Al introducir el gate en un repo con deuda histórica NO se bloquea por
+      # esa deuda (si no, ningún PR mergea). Bloquea solo lo de deuda ~nula y
+      # alto valor: secretos (gitleaks, job aparte) + misconfig de IaC/Docker.
+      # CVEs de dependencias y SAST entran REPORT-ONLY; se queman por repo y,
+      # cuando el repo llega a cero, se cambia exit-code/continue-on-error a
+      # bloqueante (ver README · se registra en gobierno/REGISTRO-EXCEPCIONES).
+
+      # BLOQUEANTE — misconfig de IaC/Docker + secretos en el árbol.
+      - name: Trivy — misconfig + secretos (bloqueante)
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
           scan-ref: .
-          scanners: vuln,secret,misconfig
+          scanners: secret,misconfig
           severity: CRITICAL,HIGH
-          ignore-unfixed: true
           exit-code: "1"
           trivyignores: .trivyignore
 
-      # SAST: inyección, SSRF, path traversal, authz rota… Falla solo en ERROR
-      # (alta confianza) para no ahogar el build con ruido el primer día.
-      - name: Semgrep (SAST)
+      # REPORT-ONLY (baseline) — CVEs de dependencias. Informan, no rompen.
+      # Flip a bloqueante: exit-code "1" cuando el repo quede en cero.
+      - name: Trivy — CVEs de dependencias (informativo)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+          trivyignores: .trivyignore
+
+      # SAST: inyección, SSRF, path traversal, authz rota… ERROR = alta confianza.
+      # REPORT-ONLY en baseline (continue-on-error). Quitar al limpiar el repo.
+      - name: Semgrep (SAST · informativo en baseline)
+        continue-on-error: true
         run: |
           pipx install semgrep || pip install --user semgrep
           semgrep scan \
@@ -75,9 +95,10 @@ jobs:
             .
 
       # Python: pip-audit es más fiel que osv para requirements.txt (lección
-      # 204-vs-24). Audita CADA requirements.txt real del repo.
-      - name: pip-audit (si hay Python)
+      # 204-vs-24). REPORT-ONLY en baseline (continue-on-error). Flip al limpiar.
+      - name: pip-audit (si hay Python · informativo en baseline)
         if: ${{ hashFiles('**/requirements.txt') != '' }}
+        continue-on-error: true
         run: |
           pipx install pip-audit || pip install --user pip-audit
           found=0
